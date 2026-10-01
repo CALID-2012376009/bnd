@@ -180,10 +180,18 @@ public class BndtoolsBuilder extends IncrementalProjectBuilder {
 
 					boolean setupChanged = false;
 
-					if (!postponed && (delta.havePropertiesChanged(model) || delta.hasChangedSubbundles())) {
-						buildLog.basic("project was dirty from changed bnd files postponed = " + postponed);
-						model.forceRefresh();
+					if (!postponed && delta.havePropertiesChanged(model)) {
+						buildLog.basic("project was dirty from changed bnd properties");
 						setupChanged = true;
+					}
+
+					if (!postponed && delta.hasChangedSubbundles()) {
+						buildLog.basic("project was dirty from changed sub-bundle inputs");
+						setupChanged = true;
+					}
+
+					if (force || setupChanged) {
+						model.forceRefresh();
 					}
 
 					if (dirty.remove(model) && !setupChanged) {
