@@ -9,6 +9,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Function;
 import java.util.stream.Stream;
 
 import org.eclipse.core.resources.IResource;
@@ -19,6 +20,7 @@ import org.eclipse.core.runtime.IPath;
 import org.eclipse.core.runtime.Path;
 
 import aQute.bnd.build.Project;
+import aQute.bnd.exceptions.Exceptions;
 import aQute.bnd.osgi.Constants;
 import aQute.bnd.osgi.Instructions;
 import aQute.bnd.osgi.Processor;
@@ -29,9 +31,10 @@ import bndtools.central.Central;
 class DeltaWrapper {
 
 	private static final IPath		EXT						= new Path("/cnf/ext");
-	private final Project			model;
-	private final IResourceDelta	delta;
-	private final BuildLogger		log;
+	private final Project					model;
+	private final IResourceDelta			delta;
+	private final BuildLogger				log;
+	private final Function<File, IPath>	toPath;
 
 	static final String[]			defaultIgnoreProperties	= new String[] {
 		Constants.DEFAULT_PROP_SRC_DIR,												//
@@ -41,9 +44,20 @@ class DeltaWrapper {
 	};
 
 	DeltaWrapper(Project model, IResourceDelta delta, BuildLogger log) {
+		this(model, delta, log, file -> {
+			try {
+				return Central.toPath(file);
+			} catch (Exception e) {
+				throw Exceptions.duck(e);
+			}
+		});
+	}
+
+	DeltaWrapper(Project model, IResourceDelta delta, BuildLogger log, Function<File, IPath> toPath) {
 		this.model = model;
 		this.delta = delta;
 		this.log = log;
+		this.toPath = toPath;
 	}
 
 	boolean hasCnfChanged() throws Exception {
@@ -170,7 +184,7 @@ class DeltaWrapper {
 		if (delta == null)
 			return false;
 
-		IPath path = Central.toPath(f);
+		IPath path = toPath.apply(f);
 		if (path == null)
 			return false;
 
@@ -270,7 +284,7 @@ class DeltaWrapper {
 
 	public boolean hasChangedSubbundles() throws CoreException {
 		if (delta == null)
-			return true;
+			return false;
 
 		final List<String> files = toFiles(false);
 		Instructions instr = new Instructions(model.getProperty(Constants.SUB));
