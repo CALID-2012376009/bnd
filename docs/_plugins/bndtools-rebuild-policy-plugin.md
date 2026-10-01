@@ -112,6 +112,18 @@ These files are regenerated on every build and should be added to `.gitignore`.
 
 In the java layer, the plugin is configured programmatically at the workspace level `Workspace.addBasicPlugin()` (not via `build.bnd` properties). This is done by Bndtools before building, based on the user's Eclipse preferences.
 
+### Automatic source attachment
+
+Bndtools automatically searches configured repositories for source bundles when a classpath library has no attached source. This behavior remains enabled by default and can be disabled under **Source Attachment** in **Preferences → Bndtools**.
+
+Administrators can disable these repository lookups for an Eclipse installation by adding the following entry to `plugin_customization.ini`:
+
+```properties
+bndtools.core/automaticSourceAttachment=false
+```
+
+Disabling automatic source attachment does not change the binary classpath or remove explicitly configured or previously persisted source attachments.
+
 ## Future Extensibility
 
 The plugin-based design enables other build tools to implement similar optimizations without modifying core bnd:

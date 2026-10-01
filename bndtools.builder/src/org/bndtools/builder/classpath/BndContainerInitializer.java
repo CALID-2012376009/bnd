@@ -319,7 +319,9 @@ public class BndContainerInitializer extends ClasspathContainerInitializer imple
 				logger.logError(error.location().message, e);
 			}
 
-			builder.entries(BndContainerSourceManager.loadAttachedSources(project, builder.entries()));
+			boolean automaticSourceAttachment = new BndPreferences().getAutomaticSourceAttachment();
+			builder.entries(BndContainerSourceManager.loadAttachedSources(project, builder.entries(),
+				automaticSourceAttachment));
 
 			if (!init) {
 				IClasspathContainer container = getClasspathContainer(javaProject);

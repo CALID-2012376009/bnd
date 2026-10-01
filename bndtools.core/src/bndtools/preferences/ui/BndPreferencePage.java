@@ -26,13 +26,14 @@ public class BndPreferencePage extends PreferencePage implements IWorkbenchPrefe
 	public static final String		PAGE_ID				= "bndtools.prefPages.basic";
 	public static final String		PAGE_ID_BUILD		= "bndtools.prefPages.build";
 
-	private boolean					noCheckCnf			= false;
-	private boolean					warnExistingLaunch	= true;
-	private boolean					buildBeforeLaunch	= true;
-	private boolean					editorOpenSourceTab	= false;
-	private boolean					workspaceIsOffline	= false;
-	private QuickFixVersioning		quickfixVersioning	= QuickFixVersioning.DEFAULT;
-	private final BndPreferences	prefs				= new BndPreferences();
+	private boolean					noCheckCnf					= false;
+	private boolean					warnExistingLaunch			= true;
+	private boolean					buildBeforeLaunch			= true;
+	private boolean					editorOpenSourceTab			= false;
+	private boolean					automaticSourceAttachment	= true;
+	private boolean					workspaceIsOffline			= false;
+	private QuickFixVersioning		quickfixVersioning			= QuickFixVersioning.DEFAULT;
+	private final BndPreferences	prefs						= new BndPreferences();
 
 	private Text					prompt;
 
@@ -72,6 +73,12 @@ public class BndPreferencePage extends PreferencePage implements IWorkbenchPrefe
 		final Button btnEditorOpenSourceTab = new Button(editorGroup, SWT.CHECK);
 		btnEditorOpenSourceTab.setText(Messages.BndPreferencePage_btnEditorOpenSourceTab);
 
+		Group sourceAttachmentGroup = new Group(composite, SWT.NONE);
+		sourceAttachmentGroup.setText(Messages.BndPreferencePage_sourceAttachmentGroup);
+
+		final Button btnAutomaticSourceAttachment = new Button(sourceAttachmentGroup, SWT.CHECK);
+		btnAutomaticSourceAttachment.setText(Messages.BndPreferencePage_btnAutomaticSourceAttachment);
+
 		// Bndtools Explorer
 		Group explorerGroup = new Group(composite, SWT.NONE);
 		explorerGroup.setText("Explorer");
@@ -86,6 +93,7 @@ public class BndPreferencePage extends PreferencePage implements IWorkbenchPrefe
 		btnWarnExistingLaunch.setSelection(warnExistingLaunch);
 		btnBuildBeforeLaunch.setSelection(buildBeforeLaunch);
 		btnEditorOpenSourceTab.setSelection(editorOpenSourceTab);
+		btnAutomaticSourceAttachment.setSelection(automaticSourceAttachment);
 		btnOfflineWorkspace.setSelection(workspaceIsOffline);
 		// headless already done
 		// versionControlIgnores already done
@@ -116,6 +124,12 @@ public class BndPreferencePage extends PreferencePage implements IWorkbenchPrefe
 			@Override
 			public void widgetSelected(SelectionEvent e) {
 				editorOpenSourceTab = btnEditorOpenSourceTab.getSelection();
+			}
+		});
+		btnAutomaticSourceAttachment.addSelectionListener(new SelectionAdapter() {
+			@Override
+			public void widgetSelected(SelectionEvent e) {
+				automaticSourceAttachment = btnAutomaticSourceAttachment.getSelection();
 			}
 		});
 		// headless already done
@@ -161,12 +175,14 @@ public class BndPreferencePage extends PreferencePage implements IWorkbenchPrefe
 
 		gd = new GridData(SWT.FILL, SWT.FILL, true, false);
 		editorGroup.setLayoutData(gd);
+		sourceAttachmentGroup.setLayoutData(gd);
 		explorerGroup.setLayoutData(gd);
 		prompt.setLayoutData(gd);
 
 		layout = new GridLayout(1, false);
 		layout.verticalSpacing = 10;
 		editorGroup.setLayout(layout);
+		sourceAttachmentGroup.setLayout(new GridLayout(1, false));
 		layout = new GridLayout(1, false);
 
 		return composite;
@@ -178,6 +194,7 @@ public class BndPreferencePage extends PreferencePage implements IWorkbenchPrefe
 		prefs.setWarnExistingLaunch(warnExistingLaunch);
 		prefs.setBuildBeforeLaunch(buildBeforeLaunch);
 		prefs.setEditorOpenSourceTab(editorOpenSourceTab);
+		prefs.setAutomaticSourceAttachment(automaticSourceAttachment);
 		prefs.setWorkspaceOffline(workspaceIsOffline);
 		prefs.setQuickFixVersioning(quickfixVersioning);
 		prefs.setPrompt(prompt.getText());
@@ -190,6 +207,7 @@ public class BndPreferencePage extends PreferencePage implements IWorkbenchPrefe
 		warnExistingLaunch = prefs.getWarnExistingLaunches();
 		buildBeforeLaunch = prefs.getBuildBeforeLaunch();
 		editorOpenSourceTab = prefs.getEditorOpenSourceTab();
+		automaticSourceAttachment = prefs.getAutomaticSourceAttachment();
 		workspaceIsOffline = prefs.isWorkspaceOffline();
 		quickfixVersioning = prefs.getQuickFixVersioning();
 	}

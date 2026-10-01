@@ -17,6 +17,8 @@ public class Messages extends NLS {
 	public static String		BndPreferencePage_versionControlIgnoresGroup_text;
 	public static String		BndPreferencePage_versionControlIgnoresCreate_text;
 	public static String		BndPreferencePage_btnEditorOpenSourceTab;
+	public static String		BndPreferencePage_sourceAttachmentGroup;
+	public static String		BndPreferencePage_btnAutomaticSourceAttachment;
 	public static String		BndPreferencePage_btnCheckCnfNow_BndConf;
 	public static String		BndPreferencePage_btnCheckCnfNow_Exists;
 	public static String		BndPreferencePage_optionAlwaysEnable;
