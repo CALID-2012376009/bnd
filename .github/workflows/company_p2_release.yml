@@ -1,0 +1,93 @@
+name: Company Bndtools p2 release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: GitHub Release tag (for example, company-7.1.0-1)
+        required: true
+        type: string
+      prerelease:
+        description: Mark the GitHub Release as a prerelease
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  release:
+    name: Build and publish p2 update site
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1
+        with:
+          egress-policy: audit
+      - name: Git Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Set up Java 8 + 17
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
+        with:
+          distribution: temurin
+          java-version: |
+            8
+            17
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb
+      - name: Validate release tag
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: git check-ref-format "refs/tags/${RELEASE_TAG}"
+      - name: Build p2 update site
+        run: ./gradlew --no-daemon :org.bndtools.p2:jar
+      - name: Prepare release asset
+        run: |
+          artifact=org.bndtools.p2/generated/org.bndtools.p2.jar
+          test -s "${artifact}" || {
+            echo "::error file=${artifact}::Expected p2 update-site archive was not generated."
+            exit 1
+          }
+          cp "${artifact}" bndtools-company-update-site.jar
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          cat >release-notes.md <<'EOF'
+          This asset is an Eclipse p2 update site. Install it in Eclipse via **Help > Install New Software > Add > Archive** and select `bndtools-company-update-site.jar`.
+
+          This company build includes the site preference `bndtools.core/automaticSourceAttachment=false` and the redundant FULL-build container-refresh fix.
+
+          This build is unsigned and does not use upstream JFrog or signing secrets.
+          EOF
+
+          release_args=(
+            --title "${RELEASE_TAG}"
+            --notes-file release-notes.md
+          )
+          if [[ "${PRERELEASE}" == "true" ]]; then
+            release_args+=(--prerelease)
+          else
+            release_args+=(--prerelease=false --latest)
+          fi
+
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            gh release edit "${RELEASE_TAG}" "${release_args[@]}"
+          else
+            gh release create "${RELEASE_TAG}" \
+              --target "${GITHUB_SHA}" \
+              "${release_args[@]}"
+          fi
+
+          gh release upload "${RELEASE_TAG}" \
+            bndtools-company-update-site.jar \
+            --clobber
