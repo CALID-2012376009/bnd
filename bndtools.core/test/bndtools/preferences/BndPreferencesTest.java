@@ -1,10 +1,13 @@
 package bndtools.preferences;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.Arrays;
 import java.util.List;
 
+import org.eclipse.jface.preference.PreferenceStore;
 import org.junit.jupiter.api.Test;
 
 public class BndPreferencesTest {
@@ -37,5 +40,15 @@ public class BndPreferencesTest {
 	public void round_trip_preserves_entries() {
 		List<String> uris = List.of("https://a/index.bnd", "file:/tmp/b/index.bnd");
 		assertEquals(uris, BndPreferences.parseUriList(BndPreferences.formatUriList(uris)));
+	}
+
+	@Test
+	public void automatic_source_attachment_defaults_to_enabled_and_can_be_disabled() {
+		BndPreferences preferences = new BndPreferences(new PreferenceStore());
+
+		assertTrue(preferences.getAutomaticSourceAttachment());
+
+		preferences.setAutomaticSourceAttachment(false);
+		assertFalse(preferences.getAutomaticSourceAttachment());
 	}
 }

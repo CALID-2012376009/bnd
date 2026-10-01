@@ -50,15 +50,20 @@ public class BndPreferences {
 	private static final String		PREF_WORKSPACE_TEMPLATE_INDEXES	= "workspaceTemplateIndexes";
 	private static final String		PREF_EXPLORER_PROMPT			= "prompt";
 	private static final String		PREF_PARALLEL					= "parallel";
-	private static final String		PREF_REBUILD_TRIGGER_POLICY		= "rebuildTriggerPolicy";
+	private static final String		PREF_REBUILD_TRIGGER_POLICY			= "rebuildTriggerPolicy";
+	public static final String		PREF_AUTOMATIC_SOURCE_ATTACHMENT	= "automaticSourceAttachment";
 
 	static final String				PREF_WORKSPACE_OFFLINE			= "workspaceIsOffline";
 
 	private final IPreferenceStore	store;
 
 	public BndPreferences() {
-		store = Plugin.getDefault()
-			.getPreferenceStore();
+		this(Plugin.getDefault()
+			.getPreferenceStore());
+	}
+
+	BndPreferences(IPreferenceStore store) {
+		this.store = store;
 
 		// Defaults...
 		store.setDefault(PREF_WARN_EXISTING_LAUNCH, true);
@@ -77,6 +82,7 @@ public class BndPreferences {
 		store.setDefault(PREF_USE_ALIAS_REQUIREMENTS, true);
 		store.setDefault(QuickFixVersioning.PREFERENCE_KEY, QuickFixVersioning.DEFAULT.toString());
 		store.setDefault(PREF_EXPLORER_PROMPT, "");
+		store.setDefault(PREF_AUTOMATIC_SOURCE_ATTACHMENT, true);
 	}
 
 	private String mapToPreference(Map<String, Boolean> names) {
@@ -252,6 +258,14 @@ public class BndPreferences {
 
 	public boolean getEditorOpenSourceTab() {
 		return store.getBoolean(PREF_EDITOR_OPEN_SOURCE_TAB);
+	}
+
+	public boolean getAutomaticSourceAttachment() {
+		return store.getBoolean(PREF_AUTOMATIC_SOURCE_ATTACHMENT);
+	}
+
+	public void setAutomaticSourceAttachment(boolean automaticSourceAttachment) {
+		store.setValue(PREF_AUTOMATIC_SOURCE_ATTACHMENT, automaticSourceAttachment);
 	}
 
 	public void setHeadlessBuildCreate(boolean headlessCreate) {

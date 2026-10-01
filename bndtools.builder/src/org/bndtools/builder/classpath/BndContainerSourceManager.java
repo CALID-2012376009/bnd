@@ -17,6 +17,7 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Properties;
 import java.util.SortedSet;
+import java.util.function.BiFunction;
 import java.util.jar.JarInputStream;
 import java.util.jar.Manifest;
 
@@ -96,13 +97,30 @@ public class BndContainerSourceManager {
 	 */
 	public static List<IClasspathEntry> loadAttachedSources(final IProject project,
 		final List<IClasspathEntry> classPathEntries) throws CoreException {
+		return loadAttachedSources(project, classPathEntries, true);
+	}
+
+	/**
+	 * Return (a potentially modified) list of {@link IClasspathEntry} instances
+	 * that will have previously persisted attached sources added and, when
+	 * enabled, missing sources looked up in repositories.
+	 */
+	public static List<IClasspathEntry> loadAttachedSources(final IProject project,
+		final List<IClasspathEntry> classPathEntries, boolean searchRepositories) throws CoreException {
 		if (classPathEntries.isEmpty()) {
 			return classPathEntries;
 		}
 
-		final List<RepositoryPlugin> repositories = RepositoryUtils.listRepositories(true);
+		final List<RepositoryPlugin> repositories = searchRepositories ? RepositoryUtils.listRepositories(true)
+			: List.of();
 		final Properties props = loadSourceAttachmentProperties(project);
+		return configureSourceAttachments(classPathEntries, props, searchRepositories,
+			(path, extraProps) -> getSourceBundle(path, extraProps, repositories));
+	}
 
+	static List<IClasspathEntry> configureSourceAttachments(final List<IClasspathEntry> classPathEntries,
+		final Properties props, boolean searchRepositories,
+		BiFunction<IPath, Map<String, String>, File> sourceBundleFinder) {
 		final List<IClasspathEntry> configuredClassPathEntries = new ArrayList<>(classPathEntries.size());
 		for (final IClasspathEntry entry : classPathEntries) {
 			if (entry.getEntryKind() != IClasspathEntry.CPE_LIBRARY || entry.getSourceAttachmentPath() != null) {
@@ -122,7 +140,7 @@ public class BndContainerSourceManager {
 				if (props.containsKey(key + PROPERTY_SRC_ROOT)) {
 					srcRoot = Path.fromPortableString((String) props.get(key + PROPERTY_SRC_ROOT));
 				}
-			} else {
+			} else if (searchRepositories) {
 				// If there is no saved source attachment, then try and find a
 				// source bundle
 				Map<String, String> extraProps = new HashMap<>();
@@ -131,7 +149,7 @@ public class BndContainerSourceManager {
 					extraProps.put(attr.getName(), attr.getValue());
 				}
 
-				File sourceBundle = getSourceBundle(entry.getPath(), extraProps, repositories);
+				File sourceBundle = sourceBundleFinder.apply(entry.getPath(), extraProps);
 				if (sourceBundle != null) {
 					srcPath = new Path(sourceBundle.getAbsolutePath());
 				}
