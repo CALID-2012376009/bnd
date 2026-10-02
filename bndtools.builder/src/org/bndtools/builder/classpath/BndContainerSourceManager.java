@@ -9,6 +9,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
@@ -20,7 +21,10 @@ import java.util.SortedSet;
 import java.util.function.BiFunction;
 import java.util.jar.JarInputStream;
 import java.util.jar.Manifest;
+import java.util.stream.Collectors;
 
+import org.bndtools.api.ILogger;
+import org.bndtools.api.Logger;
 import org.bndtools.builder.BndtoolsBuilder;
 import org.bndtools.builder.BuilderPlugin;
 import org.eclipse.core.resources.IProject;
@@ -49,9 +53,18 @@ import bndtools.central.RepositoryUtils;
 
 public class BndContainerSourceManager {
 
-	private static final String	PROPERTY_SRC_ROOT	= ".srcRoot";	//$NON-NLS-1$
+	private static final String				PROPERTY_SRC_ROOT			= ".srcRoot";	//$NON-NLS-1$
 
-	private static final String	PROPERTY_SRC_PATH	= ".srcPath";	//$NON-NLS-1$
+	private static final String				PROPERTY_SRC_PATH			= ".srcPath";	//$NON-NLS-1$
+
+	private static final String				SOURCE_LOOKUP_CACHE_FILE		= "source-lookup-cache.properties";
+
+	private static final Duration			SOURCE_LOOKUP_MISS_TTL		= Duration.ofHours(24);
+
+	private static final ILogger				logger						= Logger
+		.getLogger(BndContainerSourceManager.class);
+
+	private static volatile SourceLookupCache	sourceLookupCache;
 
 	/**
 	 * Persist the attached sources for given {@link IClasspathEntry} instances.
@@ -218,49 +231,88 @@ public class BndContainerSourceManager {
 				return null;
 			}
 
-			String bsnSource = bsn + BSN_SOURCE_SUFFIX;
-			Strategy strategy = (version == null || VERSION_ATTR_LATEST.equals(version)) ? HIGHEST : EXACT;
-			Version v = null;
+			String resolvedBsn = bsn;
+			String resolvedVersion = version;
+			String sourceLookupKey = sourceLookupKey(resolvedBsn, resolvedVersion, repositories);
+			return getSourceLookupCache().get(sourceLookupKey,
+				() -> findSourceBundle(resolvedBsn, resolvedVersion, props, repositories));
+		} catch (final Exception e) {
+			logger.logWarning("Unable to find source bundle for " + path, e);
+			return null;
+		}
+	}
 
-			for (RepositoryPlugin repo : repositories) {
+	private static File findSourceBundle(String bsn, String version, Map<String, String> props,
+		List<RepositoryPlugin> repositories) throws Exception {
+		String bsnSource = bsn + BSN_SOURCE_SUFFIX;
+		Strategy strategy = (version == null || VERSION_ATTR_LATEST.equals(version)) ? HIGHEST : EXACT;
+		Version v = null;
 
-				if (repo == null) {
-					continue;
-				}
+		for (RepositoryPlugin repo : repositories) {
 
-				if (repo instanceof WorkspaceRepository) {
-					continue;
-				}
+			if (repo == null || repo instanceof WorkspaceRepository) {
+				continue;
+			}
 
-				if (HIGHEST == strategy) {
-					SortedSet<Version> vs = repo.versions(bsn);
+			if (HIGHEST == strategy) {
+				SortedSet<Version> vs = repo.versions(bsn);
 
-					if (vs != null && !vs.isEmpty()) {
-						Version latest = vs.last();
-						File sourceBundle = repo.get(bsnSource, latest, props);
-
-						if (sourceBundle != null) {
-							return sourceBundle;
-						}
-					}
-				} else {
-
-					if (v == null) {
-						v = new Version(version); // just parse once
-					}
-					File sourceBundle = repo.get(bsnSource, v, props);
+				if (vs != null && !vs.isEmpty()) {
+					Version latest = vs.last();
+					File sourceBundle = repo.get(bsnSource, latest, props);
 
 					if (sourceBundle != null) {
 						return sourceBundle;
 					}
 				}
+			} else {
+
+				if (v == null) {
+					v = new Version(version); // just parse once
+				}
+				File sourceBundle = repo.get(bsnSource, v, props);
+
+				if (sourceBundle != null) {
+					return sourceBundle;
+				}
 			}
-		} catch (final Exception e) {
-			// Ignore, something went wrong, or we could not find the source
-			// bundle
 		}
 
 		return null;
+	}
+
+	private static String sourceLookupKey(String bsn, String version, List<RepositoryPlugin> repositories) {
+		String repositoryKey = repositories.stream()
+			.filter(repo -> repo != null && !(repo instanceof WorkspaceRepository))
+			.map(repo -> repo.getClass()
+				.getName() + ":" + repo.getName() + ":" + repo.getLocation())
+			.collect(Collectors.joining(","));
+		return bsn + "|" + ((version == null) ? VERSION_ATTR_LATEST : version) + "|" + repositoryKey;
+	}
+
+	private static SourceLookupCache getSourceLookupCache() {
+		SourceLookupCache cache = sourceLookupCache;
+		if (cache == null) {
+			synchronized (BndContainerSourceManager.class) {
+				cache = sourceLookupCache;
+				if (cache == null) {
+					File cacheFile = new File(BuilderPlugin.getInstance()
+						.getStateLocation()
+						.toFile(), SOURCE_LOOKUP_CACHE_FILE);
+					sourceLookupCache = cache = new SourceLookupCache(cacheFile, SOURCE_LOOKUP_MISS_TTL,
+						System::currentTimeMillis);
+				}
+			}
+		}
+		return cache;
+	}
+
+	public static void clearSourceLookupCache() {
+		try {
+			getSourceLookupCache().clear();
+		} catch (IOException e) {
+			logger.logWarning("Unable to clear the source lookup cache", e);
+		}
 	}
 
 	private static Properties loadSourceAttachmentProperties(final IProject project) throws CoreException {
