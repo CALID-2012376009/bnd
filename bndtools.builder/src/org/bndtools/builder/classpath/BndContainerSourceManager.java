@@ -6,6 +6,7 @@ import static aQute.bnd.service.Strategy.EXACT;
 import static aQute.bnd.service.Strategy.HIGHEST;
 
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -259,7 +260,7 @@ public class BndContainerSourceManager {
 
 				if (vs != null && !vs.isEmpty()) {
 					Version latest = vs.last();
-					File sourceBundle = repo.get(bsnSource, latest, props);
+					File sourceBundle = getSourceBundle(repo, bsnSource, latest, props);
 
 					if (sourceBundle != null) {
 						return sourceBundle;
@@ -270,7 +271,7 @@ public class BndContainerSourceManager {
 				if (v == null) {
 					v = new Version(version); // just parse once
 				}
-				File sourceBundle = repo.get(bsnSource, v, props);
+				File sourceBundle = getSourceBundle(repo, bsnSource, v, props);
 
 				if (sourceBundle != null) {
 					return sourceBundle;
@@ -279,6 +280,27 @@ public class BndContainerSourceManager {
 		}
 
 		return null;
+	}
+
+	private static File getSourceBundle(RepositoryPlugin repository, String bsn, Version version,
+		Map<String, String> properties) throws Exception {
+		try {
+			return repository.get(bsn, version, properties);
+		} catch (Exception e) {
+			if (isMissingSource(e)) {
+				return null;
+			}
+			throw e;
+		}
+	}
+
+	static boolean isMissingSource(Throwable failure) {
+		for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+			if (cause instanceof FileNotFoundException) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	private static String sourceLookupKey(String bsn, String version, List<RepositoryPlugin> repositories) {

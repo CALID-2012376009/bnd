@@ -118,6 +118,8 @@ Bndtools automatically searches configured repositories for source bundles when 
 
 To avoid repeated requests for unavailable source artifacts, Bndtools caches source lookup results across projects and Eclipse restarts. A missing source is requested only once for a dependency and repository configuration within 24 hours. The cache is cleared when repositories are refreshed or their contents change, so newly available sources can be discovered immediately after a refresh. Concurrent builds share the same in-progress lookup.
 
+Repository source lookups are not performed while Eclipse restores the initial classpath containers. Explicit and persisted source attachments are restored immediately; automatic repository lookup runs later as part of the background workspace build, so it does not delay workbench startup.
+
 Administrators can disable these repository lookups for an Eclipse installation by adding the following entry to `plugin_customization.ini`:
 
 ```properties

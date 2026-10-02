@@ -260,6 +260,10 @@ public class BndContainerInitializer extends ClasspathContainerInitializer imple
 		}
 	}
 
+	static boolean shouldSearchRepositoriesForSources(boolean automaticSourceAttachment, boolean init) {
+		return automaticSourceAttachment && !init;
+	}
+
 	private static class Updater {
 		private static final IAccessRule			DISCOURAGED			= JavaCore.newAccessRule(new Path("**"),
 			IAccessRule.K_DISCOURAGED | IAccessRule.IGNORE_IF_BETTER);
@@ -321,7 +325,7 @@ public class BndContainerInitializer extends ClasspathContainerInitializer imple
 
 			boolean automaticSourceAttachment = new BndPreferences().getAutomaticSourceAttachment();
 			builder.entries(BndContainerSourceManager.loadAttachedSources(project, builder.entries(),
-				automaticSourceAttachment));
+				shouldSearchRepositoriesForSources(automaticSourceAttachment, init)));
 
 			if (!init) {
 				IClasspathContainer container = getClasspathContainer(javaProject);
@@ -334,6 +338,7 @@ public class BndContainerInitializer extends ClasspathContainerInitializer imple
 						return; // no change; so no need for new container
 					}
 				}
+
 			}
 
 			BndContainer bndContainer = builder.build();

@@ -5,6 +5,9 @@ import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
 import java.util.List;
 import java.util.Properties;
 
@@ -41,5 +44,29 @@ public class BndContainerSourceManagerTest {
 
 		assertThat(configured).singleElement()
 			.isSameAs(binary);
+	}
+
+	@Test
+	public void wrapped_file_not_found_is_a_missing_source() {
+		Throwable failure = new InvocationTargetException(new FileNotFoundException("sources.jar"));
+
+		assertThat(BndContainerSourceManager.isMissingSource(failure)).isTrue();
+	}
+
+	@Test
+	public void other_repository_failures_are_not_missing_sources() {
+		assertThat(BndContainerSourceManager.isMissingSource(new IOException("repository unavailable"))).isFalse();
+	}
+
+	@Test
+	public void initial_container_restore_never_searches_repositories() {
+		assertThat(BndContainerInitializer.shouldSearchRepositoriesForSources(true, true)).isFalse();
+		assertThat(BndContainerInitializer.shouldSearchRepositoriesForSources(false, true)).isFalse();
+	}
+
+	@Test
+	public void background_update_searches_only_when_enabled() {
+		assertThat(BndContainerInitializer.shouldSearchRepositoriesForSources(true, false)).isTrue();
+		assertThat(BndContainerInitializer.shouldSearchRepositoriesForSources(false, false)).isFalse();
 	}
 }
