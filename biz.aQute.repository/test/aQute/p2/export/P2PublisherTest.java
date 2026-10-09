@@ -13,6 +13,7 @@ import java.io.InputStream;
 import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.Map;
 
 import javax.xml.XMLConstants;
 import javax.xml.parsers.SAXParser;
@@ -24,21 +25,88 @@ import javax.xml.validation.Validator;
 
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.xml.sax.InputSource;
 import org.xml.sax.SAXParseException;
 import org.xml.sax.XMLReader;
 import org.xml.sax.helpers.DefaultHandler;
 
+import aQute.bnd.build.Container;
 import aQute.bnd.build.Project;
 import aQute.bnd.build.Workspace;
 import aQute.bnd.osgi.Constants;
 import aQute.bnd.osgi.Jar;
 import aQute.bnd.osgi.Processor;
 import aQute.bnd.osgi.Resource;
+import aQute.bnd.service.Strategy;
+import aQute.bnd.test.jupiter.InjectTemporaryDirectory;
 import aQute.lib.io.IO;
 
 
 class P2PublisherTest {
+
+	@InjectTemporaryDirectory
+	File tmp;
+
+	@ParameterizedTest
+	@ValueSource(strings = {
+		"latest", "[1.0.0,2.0.0)"
+	})
+	void incrementalExportUsesTheIncludedJarVersionInsteadOfTheCurrentProjectVersion(String requestedVersion)
+		throws Exception {
+		IO.mkdirs(new File(tmp, Workspace.CNFDIR));
+		IO.store("", new File(tmp, "cnf/build.bnd"));
+		File bundleDir = IO.mkdirs(new File(tmp, "bundle"));
+		IO.store("Bundle-SymbolicName: bundle\nBundle-Version: 1.0.0.old\n-resourceonly: true\n"
+			+ "-includeresource: marker;literal=content\n", new File(bundleDir, Project.BNDFILE));
+		File repositoryDir = IO.mkdirs(new File(tmp, "repository"));
+		IO.store("Bundle-Version: 1.0.0\n-resourceonly: true\nfeatures: feature.bndrun\n",
+			new File(repositoryDir, Project.BNDFILE));
+		IO.store("Bundle-SymbolicName: feature\n-runbundles: bundle;version='" + requestedVersion + "'\n",
+			new File(repositoryDir, "feature.bndrun"));
+
+		try (Workspace workspace = new Workspace(tmp)) {
+			Project bundle = workspace.getProject("bundle");
+			assertThat(bundle.build()).hasSize(1);
+			assertThat(bundle.check()).isTrue();
+			bundle.setProperty(Constants.BUNDLE_VERSION, "1.0.0.new");
+			bundle.propertiesChanged();
+			Project repository = workspace.getProject("repository");
+			Container resolved = repository.getBundles(Strategy.HIGHEST,
+				"bundle;version='" + requestedVersion + "'", null).get(0);
+			assertThat(resolved.getVersion()).isEqualTo("1.0.0.new");
+			assertThat(resolved.getManifest().getMainAttributes().getValue(Constants.BUNDLE_VERSION))
+				.isEqualTo("1.0.0.old");
+
+			Map.Entry<String, Resource> exported = new P2Export(repository, Map.of()).generate();
+			assertThat(repository.check()).isTrue();
+			assertThat(exported).isNotNull();
+			try (Jar jar = new Jar("p2", exported.getValue().openInputStream());
+				Jar content = new Jar("content", jar.getResource("content.jar").openInputStream());
+				Jar artifacts = new Jar("artifacts", jar.getResource("artifacts.jar").openInputStream());
+				Jar feature = new Jar("feature", jar.getResource("features/feature_1.0.0.jar").openInputStream());
+				Jar included = new Jar("bundle", jar.getResource("plugins/bundle_1.0.0.old.jar").openInputStream())) {
+				String requirementRange = requestedVersion.equals("latest") ? "[1.0.0.old,1.0.0.old]" : requestedVersion;
+				assertThat(jar.getResources()).containsKey("plugins/bundle_1.0.0.old.jar")
+					.doesNotContainKey("plugins/bundle_1.0.0.new.jar");
+				assertThat(included.getManifest().getMainAttributes().getValue(Constants.BUNDLE_VERSION))
+					.isEqualTo("1.0.0.old");
+				assertThat(IO.collect(content.getResource("content.xml").openInputStream()))
+					.contains("<unit id=\"bundle\" version=\"1.0.0.old\"",
+						"namespace=\"osgi.bundle\" name=\"bundle\" version=\"1.0.0.old\"",
+						"name=\"bundle\" range=\"" + requirementRange + "\"",
+						"Bundle-Version: 1.0.0.old")
+					.doesNotContain("1.0.0.new");
+				assertThat(IO.collect(artifacts.getResource("artifacts.xml").openInputStream()))
+					.contains("id=\"bundle\" version=\"1.0.0.old\"")
+					.doesNotContain("1.0.0.new");
+				assertThat(IO.collect(feature.getResource("feature.xml").openInputStream()))
+					.contains("id=\"bundle\" version=\"" + requirementRange + "\"")
+					.doesNotContain("1.0.0.new");
+			}
+		}
+	}
 
 	@Test
 	void testBasic() throws Exception {

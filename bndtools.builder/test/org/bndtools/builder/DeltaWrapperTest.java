@@ -36,6 +36,31 @@ class DeltaWrapperTest {
 	}
 
 	@Test
+	void missingEclipseDeltaIsLogged() {
+		BuildLogger basicLog = new BuildLogger(BuildLogger.LOG_BASIC, "test", 0);
+		DeltaWrapper delta = new DeltaWrapper(model, null, basicLog);
+
+		assertThat(delta.hasEclipseChanged()).isTrue();
+		assertThat(basicLog.toString()).contains("Eclipse classpath check: project delta is null");
+	}
+
+	@Test
+	void eclipseClasspathDeltaFlagsAreLogged() {
+		BuildLogger basicLog = new BuildLogger(BuildLogger.LOG_BASIC, "test", 0);
+		IResourceDelta root = mock(IResourceDelta.class);
+		IResourceDelta classpath = mock(IResourceDelta.class);
+		when(root.findMember(new Path(".classpath"))).thenReturn(classpath);
+		when(classpath.getKind()).thenReturn(IResourceDelta.CHANGED);
+		when(classpath.getFlags()).thenReturn(IResourceDelta.CONTENT);
+
+		DeltaWrapper delta = new DeltaWrapper(model, root, basicLog);
+
+		assertThat(delta.hasEclipseChanged()).isTrue();
+		assertThat(basicLog.toString()).contains("Eclipse .classpath delta: kind=" + IResourceDelta.CHANGED
+			+ ", flags=" + IResourceDelta.CONTENT);
+	}
+
+	@Test
 	void changedPropertiesFileIsReported() throws Exception {
 		File propertiesFile = new File("project", Project.BNDFILE);
 		Processor processor = mock(Processor.class);
@@ -74,5 +99,29 @@ class DeltaWrapperTest {
 		DeltaWrapper delta = new DeltaWrapper(model, root, log);
 
 		assertThat(delta.hasChangedSubbundles()).isTrue();
+	}
+
+	@Test
+	void markerOnlyProjectChangeIsIgnored() throws Exception {
+		when(model.getIncluded()).thenReturn(Collections.emptyList());
+
+		IResourceDelta root = mock(IResourceDelta.class);
+		IResourceDelta markerChange = mock(IResourceDelta.class);
+		IResource resource = mock(IResource.class);
+		when(markerChange.getKind()).thenReturn(IResourceDelta.CHANGED);
+		when(markerChange.getFlags()).thenReturn(IResourceDelta.MARKERS);
+		when(markerChange.getResource()).thenReturn(resource);
+		when(resource.getType()).thenReturn(IResource.FILE);
+		when(resource.getProjectRelativePath()).thenReturn(new Path("src/example/Example.java"));
+		doAnswer(invocation -> {
+			invocation.getArgument(0, IResourceDeltaVisitor.class)
+				.visit(markerChange);
+			return null;
+		}).when(root)
+			.accept(any());
+
+		DeltaWrapper delta = new DeltaWrapper(model, root, log);
+
+		assertThat(delta.hasProjectChanged()).isFalse();
 	}
 }

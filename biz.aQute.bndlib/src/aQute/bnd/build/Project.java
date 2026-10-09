@@ -968,6 +968,37 @@ public class Project extends Processor {
 	}
 
 	/**
+	 * An ordered, immutable snapshot of the prepared build, test and boot
+	 * classpath collections. Container objects themselves are not copied.
+	 */
+	public record ClasspathSnapshot(List<Container> buildpath, List<Container> testpath,
+		List<Container> bootclasspath) {
+		public ClasspathSnapshot {
+			buildpath = List.copyOf(buildpath);
+			testpath = List.copyOf(testpath);
+			bootclasspath = List.copyOf(bootclasspath);
+		}
+	}
+
+	/**
+	 * Prepare and copy all compile-time paths under the same monitor used by
+	 * {@link #prepare()}. Unlike the live collections returned by the individual
+	 * path getters, these lists can be iterated after releasing the monitor,
+	 * even when another thread or a reentrant call prepares this project again.
+	 * This does not make other project operations thread-safe.
+	 *
+	 * @return a coherent snapshot of the prepared compile-time paths
+	 * @throws Exception if preparing the paths fails
+	 */
+	public ClasspathSnapshot getClasspathSnapshot() throws Exception {
+		synchronized (preparedPaths) {
+			prepare();
+			return new ClasspathSnapshot(new ArrayList<>(buildpath), new ArrayList<>(testpath),
+				new ArrayList<>(bootclasspath));
+		}
+	}
+
+	/**
 	 * Handle dependencies for paths that are calculated on demand.
 	 */
 	private void justInTime(Collection<Container> path, List<Container> entries, boolean noproject, String name) {

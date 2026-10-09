@@ -122,7 +122,8 @@ class DeltaWrapper {
 			@Override
 			public boolean visit(IResourceDelta visitDelta) throws CoreException {
 
-				if ((delta.getKind() & (IResourceDelta.ADDED | IResourceDelta.CHANGED | IResourceDelta.REMOVED)) == 0)
+				if ((visitDelta.getKind()
+					& (IResourceDelta.ADDED | IResourceDelta.CHANGED | IResourceDelta.REMOVED)) == 0)
 					return false;
 
 				IResource resource = visitDelta.getResource();
@@ -145,7 +146,7 @@ class DeltaWrapper {
 					}
 				}
 
-				if (IResourceDelta.MARKERS == delta.getFlags())
+				if (IResourceDelta.MARKERS == visitDelta.getFlags())
 					return false;
 
 				log.basic("%s changed", resource);
@@ -324,9 +325,15 @@ class DeltaWrapper {
 	}
 
 	public boolean hasEclipseChanged() {
-		if (delta == null)
+		if (delta == null) {
+			log.basic("Eclipse classpath check: project delta is null");
 			return true;
+		}
 		IPath path = new Path(".classpath");
-		return delta.findMember(path) != null;
+		IResourceDelta classpath = delta.findMember(path);
+		if (classpath == null)
+			return false;
+		log.basic("Eclipse .classpath delta: kind=%d, flags=%d", classpath.getKind(), classpath.getFlags());
+		return true;
 	}
 }

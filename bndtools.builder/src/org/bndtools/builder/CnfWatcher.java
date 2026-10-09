@@ -1,6 +1,7 @@
 package org.bndtools.builder;
 
 import java.util.Collection;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.bndtools.api.BndtoolsConstants;
 import org.bndtools.api.ILogger;
@@ -19,11 +20,13 @@ import org.eclipse.core.runtime.Status;
 
 import aQute.bnd.build.Project;
 import aQute.bnd.build.Workspace;
+import aQute.bnd.exceptions.ConsumerWithException;
 import bndtools.central.Central;
 
 public class CnfWatcher implements IResourceChangeListener {
 	private static final ILogger	logger		= Logger.getLogger(CnfWatcher.class);
 	private static final CnfWatcher	INSTANCE	= new CnfWatcher();
+	private final AtomicBoolean		refreshScheduled	= new AtomicBoolean();
 
 	static CnfWatcher install() {
 		ResourcesPlugin.getWorkspace()
@@ -32,6 +35,23 @@ public class CnfWatcher implements IResourceChangeListener {
 	}
 
 	private CnfWatcher() {}
+
+	static boolean isRefreshPending() {
+		return INSTANCE.refreshScheduled.get();
+	}
+
+	static Collection<Project> refreshWorkspace(Workspace workspace, ConsumerWithException<Workspace> configure)
+		throws Exception {
+		return workspace.writeLocked(() -> {
+			workspace.refresh();
+			configure.accept(workspace);
+			Collection<Project> projects = workspace.getAllProjects();
+			// Repository indexes can change without changing bnd properties.
+			// Invalidate paths before JDT's pre-compilation callback uses them.
+			projects.forEach(Project::setChanged);
+			return projects;
+		});
+	}
 
 	@Override
 	public void resourceChanged(final IResourceChangeEvent event) {
@@ -70,13 +90,16 @@ public class CnfWatcher implements IResourceChangeListener {
 				.next();
 			DeltaWrapper dw = new DeltaWrapper(p, delta, new BuildLogger(BuildLogger.LOG_NONE, "", 0));
 			if (dw.hasCnfChanged()) {
+				if (!refreshScheduled.compareAndSet(false, true))
+					return;
+
 				WorkspaceJob j = new WorkspaceJob("Refreshing workspace for cnf change") {
 					@Override
 					public IStatus runInWorkspace(IProgressMonitor arg0) throws CoreException {
 						try {
-							workspace.refresh();
-							Central.applyRebuildTriggerPolicy(workspace);
-							BndtoolsBuilder.dirty.addAll(allProjects);
+							Collection<Project> refreshed = refreshWorkspace(workspace,
+								Central::applyRebuildTriggerPolicy);
+							BndtoolsBuilder.dirty.addAll(refreshed);
 							MarkerSupport ms = new MarkerSupport(cnfProject);
 							ms.deleteMarkers("*");
 							ms.setMarkers(workspace, BndtoolsConstants.MARKER_BND_WORKSPACE_PROBLEM);
@@ -86,11 +109,13 @@ public class CnfWatcher implements IResourceChangeListener {
 							return new Status(IStatus.ERROR, BndtoolsBuilder.PLUGIN_ID,
 								"error during workspace refresh",
 								e);
+						} finally {
+							refreshScheduled.set(false);
 						}
 						return Status.OK_STATUS;
 					}
 				};
-				j.schedule();
+				j.schedule(100);
 			}
 		} catch (Exception e) {
 			logger.logError("Detecting changes in cnf failed, ignoring", e);

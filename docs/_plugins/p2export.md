@@ -161,6 +161,13 @@ The examples generate `[2.0.9,3.0.0)` for a consumer range and
 `project`, or an omitted version still generates an exact requirement for the
 resolved artifact version.
 
+Bundle identities in the repository metadata and plugin filenames are taken
+from the included JAR manifests. In an incremental workspace build, a project's
+current version can differ from the version of an existing, unchanged output
+JAR. The exporter uses the output JAR's identity consistently for the installable
+unit, artifact, feature requirement and OSGi touchpoint manifest; it does not
+relabel old JAR bytes with the project's newer version.
+
 Features can also require other features. Features, and theoretically other requirements can be added using the Require-Capability header. For this reason, a number of pseudo namespaces are created to make it more readable.
 
 * `feature` – Specifies a feature

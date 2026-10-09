@@ -74,6 +74,41 @@ When a workspace is created, it will first read in the properties in the `.bnd` 
 
 The `target-dir` defines where the build process places the build output artifacts. By default this folder is named `generated`.
 
+### Classpath changes in Bndtools
+
+Bndtools refreshes project properties, including included `.bnd` files, before
+calculating the classpath for Eclipse's Java compiler. This allows changes to
+`-buildpath` and `-testpath`, for example after switching Git branches, to be
+used in the same Java build rather than first being discovered during bundle
+packaging. If the classpath still changes during packaging, Bndtools postpones
+packaging until Java compilation has run with the updated classpath. Changes to
+compiled output remain build inputs so that bundles contain the latest classes.
+
+The pre-compilation refresh takes the workspace write lock; ordinary container
+initialization and updates use the workspace read lock. Build, test and boot
+paths are copied together under the project's preparation monitor before any
+Eclipse/JDT calls. These immutable collection snapshots remain valid when another
+workspace reader or a reentrant callback prepares the project again. The monitor
+is released before classpath entry conversion, so bundle builds are not globally
+serialized. The existing live path getters remain unchanged.
+If classpath calculation
+fails, Bndtools logs the exception and reports the failed update without publishing
+or persisting an empty replacement container.
+
+Changes to repository indexes in `cnf`, such as Maven index files, also invalidate
+prepared project paths during the workspace refresh, even when no `.bnd`
+properties changed. The refresh and invalidation share the workspace write lock,
+so Java's pre-compilation callback can resolve the new dependencies before bundle
+packaging instead of discovering them only in the bnd builder.
+
+For diagnosing repeated builds, select **Basic** Build Logging in the Bndtools
+Build preferences. `CLASSPATH UPDATE` messages distinguish changed classpath
+entries from newer input timestamps and identify the input responsible for the
+latest timestamp. Entry changes report only the first differing entry rather
+than dumping the whole classpath. `JAVA FULL BUILD` messages identify full Java
+builds requested by a container update; bundle build messages identify postponed
+builds being resumed and changes to Eclipse's `.classpath` resource.
+
 ### Avoiding target-dir conflicts between different build tools
 
 In the default setup of the workspace, the gradle build tool & eclipse share the same output directories. In general, this means you always have to clean in each tool and in the case of Eclipse stop the incremental builder (otherwise eclipse will start rebuilding the whole workspace when you do a `gradle clean build`).

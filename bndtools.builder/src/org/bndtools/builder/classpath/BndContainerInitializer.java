@@ -26,6 +26,7 @@ import org.bndtools.api.ILogger;
 import org.bndtools.api.Logger;
 import org.bndtools.api.ModelListener;
 import org.bndtools.builder.BuildLogger;
+import org.bndtools.builder.BndtoolsBuilder;
 import org.bndtools.builder.BuilderPlugin;
 import org.bndtools.utils.jar.PseudoJar;
 import org.eclipse.core.resources.IProject;
@@ -33,7 +34,9 @@ import org.eclipse.core.resources.IResource;
 import org.eclipse.core.resources.IWorkspaceRoot;
 import org.eclipse.core.runtime.CoreException;
 import org.eclipse.core.runtime.IPath;
+import org.eclipse.core.runtime.IStatus;
 import org.eclipse.core.runtime.Path;
+import org.eclipse.core.runtime.Status;
 import org.eclipse.jdt.core.ClasspathContainerInitializer;
 import org.eclipse.jdt.core.IAccessRule;
 import org.eclipse.jdt.core.IClasspathAttribute;
@@ -47,7 +50,6 @@ import org.eclipse.jdt.internal.core.index.DiskIndex;
 import org.eclipse.jdt.launching.IRuntimeClasspathEntry;
 import org.eclipse.jdt.launching.JavaRuntime;
 
-import aQute.bnd.build.CircularDependencyException;
 import aQute.bnd.build.Container;
 import aQute.bnd.build.Project;
 import aQute.bnd.build.RepoCollector;
@@ -174,6 +176,34 @@ public class BndContainerInitializer extends ClasspathContainerInitializer imple
 		return getClasspathContainer(javaProject) != oldContainer;
 	}
 
+	static Collection<Container> getRefreshedBuildpath(Project model) throws Exception {
+		// JDT requests the container before the bnd builder processes the delta.
+		return model.getWorkspace()
+			.writeLocked(() -> {
+				model.refresh();
+				return model.getClasspathSnapshot().buildpath();
+			});
+	}
+
+	static String describeClasspathChange(BndContainer previous, BndContainer updated) {
+		if (previous == null) {
+			return String.format("initial container, entries=%d, timestamp=%d", updated.getClasspathEntries().length,
+				updated.lastModified());
+		}
+		IClasspathEntry[] oldEntries = previous.getClasspathEntries();
+		IClasspathEntry[] newEntries = updated.getClasspathEntries();
+		int difference = Arrays.mismatch(oldEntries, newEntries);
+		String summary = String.format("entriesChanged=%s, timestampAdvanced=%s, entries=%d->%d, timestamp=%d->%d",
+			difference >= 0, updated.lastModified() > previous.lastModified(), oldEntries.length, newEntries.length,
+			previous.lastModified(), updated.lastModified());
+		if (difference >= 0) {
+			summary += String.format(", firstDifference=%d, oldEntry=%s, newEntry=%s", difference,
+				difference < oldEntries.length ? oldEntries[difference] : "<absent>",
+				difference < newEntries.length ? newEntries[difference] : "<absent>");
+		}
+		return summary;
+	}
+
 	private static BndContainer loadClasspathContainer(IProject project) {
 		File containerFile = getContainerFile(project);
 		if (!containerFile.isFile()) {
@@ -264,7 +294,7 @@ public class BndContainerInitializer extends ClasspathContainerInitializer imple
 		return automaticSourceAttachment && !init;
 	}
 
-	private static class Updater {
+	static class Updater {
 		private static final IAccessRule			DISCOURAGED			= JavaCore.newAccessRule(new Path("**"),
 			IAccessRule.K_DISCOURAGED | IAccessRule.IGNORE_IF_BETTER);
 
@@ -279,11 +309,18 @@ public class BndContainerInitializer extends ClasspathContainerInitializer imple
 		private final IWorkspaceRoot				root;
 		private final Project						model;
 		private final BndContainer.Builder			builder;
+		private File								latestClasspathInput;
 
 		private final File							empty_index_file;
 		private final IClasspathAttribute			EMPTY_INDEX;
 
 		Updater(IProject project, IJavaProject javaProject) {
+			this(project, javaProject, getModel(project), IO.getFile(BuilderPlugin.getInstance()
+				.getStateLocation()
+				.toFile(), "empty-" + project.getName() + ".index"));
+		}
+
+		Updater(IProject project, IJavaProject javaProject, Project model, File emptyIndexFile) {
 			assert project != null;
 			assert javaProject != null;
 			this.project = project;
@@ -291,22 +328,22 @@ public class BndContainerInitializer extends ClasspathContainerInitializer imple
 			this.root = project.getWorkspace()
 				.getRoot();
 			this.builder = new BndContainer.Builder();
-			Project p = null;
+			this.model = model;
+			empty_index_file = emptyIndexFile;
+			EMPTY_INDEX = JavaCore.newClasspathAttribute(IClasspathAttribute.INDEX_LOCATION_ATTRIBUTE_NAME,
+				"file://" + empty_index_file.getAbsolutePath());
+			writeDummyEmptyIndexFile(empty_index_file);
+		}
+
+		private static Project getModel(IProject project) {
 			try {
-				p = Central.getProject(project);
+				return Central.getProject(project);
 			} catch (Exception e) {
 				// this can happen during first project creation in an empty
 				// workspace
 				logger.logInfo("Unable to get bnd project for project " + project.getName(), e);
+				return null;
 			}
-			this.model = p;
-
-			empty_index_file = IO.getFile(BuilderPlugin.getInstance()
-				.getStateLocation()
-				.toFile(), "empty-" + project.getName() + ".index");
-			EMPTY_INDEX = JavaCore.newClasspathAttribute(IClasspathAttribute.INDEX_LOCATION_ATTRIBUTE_NAME,
-				"file://" + empty_index_file.getAbsolutePath());
-			writeDummyEmptyIndexFile(empty_index_file);
 		}
 
 		void updateClasspathContainer(boolean init) throws CoreException {
@@ -320,15 +357,17 @@ public class BndContainerInitializer extends ClasspathContainerInitializer imple
 					.readLocked(this::calculateProjectClasspath);
 			} catch (Exception e) {
 				SetLocation error = error("Unable to calculate classpath for project %s", e, project.getName());
-				logger.logError(error.location().message, e);
+				Status status = new Status(IStatus.ERROR, BndtoolsBuilder.PLUGIN_ID, error.location().message, e);
+				logger.logStatus(status);
+				throw new CoreException(status);
 			}
 
 			boolean automaticSourceAttachment = new BndPreferences().getAutomaticSourceAttachment();
 			builder.entries(BndContainerSourceManager.loadAttachedSources(project, builder.entries(),
 				shouldSearchRepositoriesForSources(automaticSourceAttachment, init)));
 
+			IClasspathContainer container = getClasspathContainer(javaProject);
 			if (!init) {
-				IClasspathContainer container = getClasspathContainer(javaProject);
 				if (container instanceof BndContainer) {
 					BndContainer bndContainer = (BndContainer) container;
 					List<IClasspathEntry> currentClasspath = Arrays.asList(bndContainer.getClasspathEntries());
@@ -343,6 +382,11 @@ public class BndContainerInitializer extends ClasspathContainerInitializer imple
 
 			BndContainer bndContainer = builder.build();
 			bndContainer.refresh();
+			if (new BndPreferences().getBuildLogging() >= BuildLogger.LOG_BASIC) {
+				BndContainer previous = container instanceof BndContainer ? (BndContainer) container : null;
+				logger.logInfo(String.format("CLASSPATH UPDATE %s: %s, timestampSource=%s", project.getName(),
+					describeClasspathChange(previous, bndContainer), latestClasspathInput), null);
+			}
 			setClasspathContainer(javaProject, bndContainer);
 			storeClasspathContainer(project, bndContainer);
 		}
@@ -376,48 +420,35 @@ public class BndContainerInitializer extends ClasspathContainerInitializer imple
 			}, null);
 		}
 
-		private Void calculateProjectClasspath() throws CoreException {
+		BndContainer calculateProjectClasspath() throws Exception {
 			if (!project.isOpen()) {
-				return null;
+				return builder.build();
 			}
 
-			try {
-				Collection<Container> containers = model.getBuildpath();
-				calculateContainersClasspath(Constants.BUILDPATH, containers);
+			Project.ClasspathSnapshot paths = model.getClasspathSnapshot();
+			calculateContainersClasspath(Constants.BUILDPATH, paths.buildpath());
+			calculateContainersClasspath(Constants.TESTPATH, paths.testpath());
+			calculateContainersClasspath(Constants.BUILDPATH, paths.bootclasspath());
 
-				containers = model.getTestpath();
-				calculateContainersClasspath(Constants.TESTPATH, containers);
+			// handle ${repo} reference. This is especially needed for
+			// sub-bundles (bundles which wrap other (non-osgi) jars
+			// and were we want to have source attachments for Eclipse
+			Collection<Container> containers = RepoCollector.collectRepoReferences(model);
+			calculateContainersClasspath(Constants.BUILDPATH, containers);
+			containers = model.getSubProjects()
+				.stream()
+				.map(sp -> {
 
-				containers = model.getBootclasspath();
-				calculateContainersClasspath(Constants.BUILDPATH, containers);
-
-				// handle ${repo} reference. This is especially needed for
-				// sub-bundles (bundles which wrap other (non-osgi) jars
-				// and were we want to have source attachments for Eclipse
-				containers = RepoCollector.collectRepoReferences(model);
-				calculateContainersClasspath(Constants.BUILDPATH, containers);
-				containers = model.getSubProjects()
-					.stream()
-					.map(sp -> {
-
-						try {
-							return RepoCollector.collectRepoReferences(sp);
-						} catch (IOException e) {
-							throw Exceptions.duck(e);
-						}
-					})
-					.flatMap(Collection::stream)
-					.toList();
-				calculateContainersClasspath(Constants.BUILDPATH, containers);
-
-			} catch (CircularDependencyException e) {
-				error("Circular dependency during classpath calculation: %s", e, e.getMessage());
-				builder.entries(Collections.emptyList());
-			} catch (Exception e) {
-				error("Unexpected error during classpath calculation: %s", e, e.getMessage());
-				builder.entries(Collections.emptyList());
-			}
-			return null;
+					try {
+						return RepoCollector.collectRepoReferences(sp);
+					} catch (IOException e) {
+						throw Exceptions.duck(e);
+					}
+				})
+				.flatMap(Collection::stream)
+				.toList();
+			calculateContainersClasspath(Constants.BUILDPATH, containers);
+			return builder.build();
 		}
 
 		private void calculateContainersClasspath(String instruction, Collection<Container> containers)
@@ -455,7 +486,7 @@ public class BndContainerInitializer extends ClasspathContainerInitializer imple
 					error(c, instruction, "Failed to convert file %s to Eclipse path: %s", e, file, e.getMessage());
 					continue;
 				}
-				IResource resource = Central.toResource(file);
+				IResource resource = fileToResource(file);
 				if (resource != null) {
 					builder.refresh(resource);
 				}
@@ -633,11 +664,24 @@ public class BndContainerInitializer extends ClasspathContainerInitializer imple
 				return;
 			}
 
-			IClasspathEntry libraryEntry = JavaCore.newLibraryEntry(path, sourceAttachmentPath,
-				sourceAttachmentRootPath, toAccessRulesArray(accessRules), toClasspathAttributesArray(extraAttrs),
-				false);
+			IClasspathEntry libraryEntry = createLibraryEntry(path, sourceAttachmentPath,
+				sourceAttachmentRootPath, toAccessRulesArray(accessRules), toClasspathAttributesArray(extraAttrs));
 			builder.entry(libraryEntry);
-			builder.updateLastModified(file.lastModified());
+			updateLastModified(file);
+		}
+
+		IClasspathEntry createLibraryEntry(IPath path, IPath sourceAttachmentPath, IPath sourceAttachmentRootPath,
+			IAccessRule[] accessRules, IClasspathAttribute[] extraAttrs) {
+			return JavaCore.newLibraryEntry(path, sourceAttachmentPath, sourceAttachmentRootPath, accessRules,
+				extraAttrs, false);
+		}
+
+		private void updateLastModified(File file) {
+			long time = file.lastModified();
+			if (time > builder.lastModified()) {
+				latestClasspathInput = file;
+			}
+			builder.updateLastModified(time);
 		}
 
 		private List<IClasspathAttribute> calculateContainerAttributes(Container c) {
@@ -730,7 +774,7 @@ public class BndContainerInitializer extends ClasspathContainerInitializer imple
 			if (exists) { // read persisted access patterns
 				try {
 					oldAccessPatterns = IO.collect(accessPatternsFile);
-					builder.updateLastModified(accessPatternsFile.lastModified());
+					updateLastModified(accessPatternsFile);
 				} catch (final IOException e) {
 					logger.logError("Failed to read access patterns file for project " + p.getName(), e);
 				}
@@ -771,7 +815,7 @@ public class BndContainerInitializer extends ClasspathContainerInitializer imple
 			if (!exists || !newAccessPatterns.equals(oldAccessPatterns)) {
 				try {
 					IO.store(newAccessPatterns, accessPatternsFile);
-					builder.updateLastModified(accessPatternsFile.lastModified());
+					updateLastModified(accessPatternsFile);
 				} catch (final IOException e) {
 					logger.logError("Failed to write access patterns file for project " + p.getName(), e);
 				}
@@ -804,7 +848,11 @@ public class BndContainerInitializer extends ClasspathContainerInitializer imple
 			return attrsArray;
 		}
 
-		private IPath fileToPath(File file) throws Exception {
+		IResource fileToResource(File file) {
+			return Central.toResource(file);
+		}
+
+		IPath fileToPath(File file) throws Exception {
 			IPath path = Central.toPath(file);
 			if (path == null)
 				path = Path.fromOSString(file.getAbsolutePath());

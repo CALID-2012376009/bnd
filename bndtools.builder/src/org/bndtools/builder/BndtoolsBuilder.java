@@ -102,6 +102,11 @@ public class BndtoolsBuilder extends IncrementalProjectBuilder {
 
 			listeners.fireBuildStarting(myProject);
 
+			if (kind == AUTO_BUILD && CnfWatcher.isRefreshPending()) {
+				buildLog.basic("postponing auto build until pending cnf refresh completes");
+				return postpone();
+			}
+
 			MarkerSupport markers = new MarkerSupport(myProject);
 
 			Project ourModel = null;
@@ -224,6 +229,11 @@ public class BndtoolsBuilder extends IncrementalProjectBuilder {
 						model.clear();
 
 						boolean changedClasspath = setupChanged && requestClasspathContainerUpdate(myProject);
+						if (changedClasspath) {
+							buildLog.basic("postponing build until Java compilation uses the updated classpath");
+							postpone();
+							return null;
+						}
 
 						force = true;
 					}
@@ -232,7 +242,7 @@ public class BndtoolsBuilder extends IncrementalProjectBuilder {
 					// We did not postpone, so reset the flag
 					//
 					if (postponed) {
-						buildLog.full("Was postponed");
+						buildLog.basic("resuming postponed build");
 						force = true;
 						postponed = false;
 					}

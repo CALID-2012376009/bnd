@@ -648,16 +648,21 @@ class P2Export {
 					if (c.getError() != null) {
 						bndrun.error("Feature %s dependency %s has an error", featureFile, c);
 					} else {
-						BundleId bundleId = c.getBundleId();
-						Bundle b = bundles.computeIfAbsent(bundleId, k -> {
-							try {
-								return new Bundle(k, Domain.domain(c.getManifest()), c.getAttributes(),
-									c.getManifest());
-							} catch (Exception e) {
-								bndrun.error("failed to retrieve manifest from bundle %s: %s", c, e);
-								return null;
-							}
-						});
+						Manifest manifest = c.getManifest();
+						if (manifest == null) {
+							bndrun.error("Feature %s dependency %s has no manifest", featureFile, c);
+							continue;
+						}
+						Domain domain = Domain.domain(manifest);
+						BundleId bundleId = domain.getBundleId();
+						if (bundleId == null) {
+							bndrun.error("Feature %s dependency %s has no Bundle-SymbolicName", featureFile, c);
+							continue;
+						}
+						// Workspace container versions can advance without
+						// rebuilding the JAR. P2 must describe the actual bytes.
+						Bundle b = bundles.computeIfAbsent(bundleId,
+							k -> new Bundle(k, domain, c.getAttributes(), manifest));
 						units.add(b);
 						Map<String, String> attributes = c.getAttributes();
 						BundleId range = toRequirement(bundleId, attributes);
