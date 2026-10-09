@@ -1,6 +1,7 @@
 package org.bndtools.builder;
 
 import java.util.Collection;
+import java.util.function.Consumer;
 
 import org.bndtools.api.BndtoolsConstants;
 import org.bndtools.api.ILogger;
@@ -74,9 +75,8 @@ public class CnfWatcher implements IResourceChangeListener {
 					@Override
 					public IStatus runInWorkspace(IProgressMonitor arg0) throws CoreException {
 						try {
-							workspace.refresh();
-							Central.applyRebuildTriggerPolicy(workspace);
-							BndtoolsBuilder.dirty.addAll(allProjects);
+							Collection<Project> refreshed = refreshWorkspace(workspace, Central::applyRebuildTriggerPolicy);
+							BndtoolsBuilder.dirty.addAll(refreshed);
 							MarkerSupport ms = new MarkerSupport(cnfProject);
 							ms.deleteMarkers("*");
 							ms.setMarkers(workspace, BndtoolsConstants.MARKER_BND_WORKSPACE_PROBLEM);
@@ -95,5 +95,17 @@ public class CnfWatcher implements IResourceChangeListener {
 		} catch (Exception e) {
 			logger.logError("Detecting changes in cnf failed, ignoring", e);
 		}
+	}
+
+	static Collection<Project> refreshWorkspace(Workspace workspace, Consumer<Workspace> applyRebuildTriggerPolicy)
+		throws Exception {
+		return workspace.writeLocked(() -> {
+			workspace.refresh();
+			applyRebuildTriggerPolicy.accept(workspace);
+			Collection<Project> projects = workspace.getAllProjects();
+			// Repository indexes can change without bnd properties.
+			projects.forEach(Project::setChanged);
+			return projects;
+		});
 	}
 }
