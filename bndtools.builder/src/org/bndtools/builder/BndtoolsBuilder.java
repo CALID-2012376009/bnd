@@ -45,6 +45,9 @@ import bndtools.preferences.CompileErrorAction;
  * This a Builder for bndtools.It will use the bnd project/workspace model to
  * incrementally build bundles. This is a rewrite of the NewBuilder. Left out
  * are the Eclipse classpath include in a build option.
+ * <p>
+ * If changed project setup updates the classpath after Java compilation,
+ * packaging is postponed until a subsequent builder invocation.
  *
  * <pre>
  *  create project test with 1 class
@@ -224,7 +227,11 @@ public class BndtoolsBuilder extends IncrementalProjectBuilder {
 						model.clear();
 
 						boolean changedClasspath = setupChanged && requestClasspathContainerUpdate(myProject);
-
+						if (changedClasspath) {
+							buildLog.basic("postponing build until Java compilation uses the updated classpath");
+							postpone();
+							return null;
+						}
 						force = true;
 					}
 
@@ -232,7 +239,7 @@ public class BndtoolsBuilder extends IncrementalProjectBuilder {
 					// We did not postpone, so reset the flag
 					//
 					if (postponed) {
-						buildLog.full("Was postponed");
+						buildLog.basic("resuming postponed build");
 						force = true;
 						postponed = false;
 					}
